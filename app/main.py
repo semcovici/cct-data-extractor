@@ -16,7 +16,7 @@ if "OPENAI_API_KEY" not in os.environ:
 
 col1, col2 = st.columns([0.23, 1])
 
-col1 = col1.image('../images/logo clube pres_Prancheta 1.png')
+col1 = col1.image('images/logo clube pres_Prancheta 1.png')
 col2.title("Extração de Dados de Múltiplos PDFs - CCT")
 st.write("Arraste os seus arquivos PDF e clique no botão para iniciar a extração das informações.")
 
