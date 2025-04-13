@@ -14,7 +14,10 @@ os.environ["OCR_AGENT"] = "unstructured.partition.utils.ocr_models.tesseract_ocr
 if "OPENAI_API_KEY" not in os.environ:
     os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 
-st.title("Extração de Dados de Múltiplos PDFs - CCT")
+col1, col2 = st.columns([0.23, 1])
+
+col1 = col1.image('../images/logo clube pres_Prancheta 1.png')
+col2.title("Extração de Dados de Múltiplos PDFs - CCT")
 st.write("Arraste os seus arquivos PDF e clique no botão para iniciar a extração das informações.")
 
 # Área de upload para múltiplos arquivos PDF
