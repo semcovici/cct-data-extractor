@@ -1,0 +1,6 @@
+ffmpeg 
+libsm6
+libxext6
+poppler-utils 
+tesseract-ocr 
+tesseract-ocr-por
