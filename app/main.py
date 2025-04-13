@@ -10,75 +10,92 @@ from CCTDataExtractor import CCTDataExtractor
 # Configuração do OCR (se necessário)
 os.environ["OCR_AGENT"] = "unstructured.partition.utils.ocr_models.tesseract_ocr.OCRAgentTesseract"
 
-# Configuração da API Key via st.secrets (certifique-se que o arquivo .streamlit/secrets.toml existe)
+# Configuração da API Key via st.secrets (certifique-se de que o arquivo .streamlit/secrets.toml existe)
 if "OPENAI_API_KEY" not in os.environ:
     os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 
-# Título da aplicação
-st.title("Extração de Dados de PDF - CCT")
+st.title("Extração de Dados de Múltiplos PDFs - CCT")
+st.write("Arraste os seus arquivos PDF e clique no botão para iniciar a extração das informações.")
 
-st.write("Arraste o seu arquivo PDF e clique no botão para iniciar a extração das informações.")
+# Área de upload para múltiplos arquivos PDF
+uploaded_pdfs = st.file_uploader("Selecione arquivos PDF", type=["pdf"], accept_multiple_files=True)
 
-# Área de upload do arquivo PDF
-uploaded_pdf = st.file_uploader("Selecione um arquivo PDF", type=["pdf"])
-
-if uploaded_pdf is not None:
+if uploaded_pdfs:
     if st.button("Extrair Informações"):
-        # Cria um arquivo temporário para salvar o PDF (necessário para que o extrator trabalhe com um caminho de arquivo)
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-            tmp_file.write(uploaded_pdf.read())
-            tmp_pdf_path = tmp_file.name
+        total_files = len(uploaded_pdfs)
+        progress_bar = st.progress(0)
+        status_text = st.empty()
 
-        try:
-            # Inicializa a instância do extrator com a API Key
-            extractor = CCTDataExtractor(api_key=os.environ["OPENAI_API_KEY"])
-            # Executa a extração a partir do PDF
-            cct_data = extractor.extract_from_pdf(tmp_pdf_path)
+        # Listas para acumular os registros dos dados básicos e dos seguros
+        basic_records = []
+        seguros_records = []
 
-            # Converte o resultado para um dicionário (compatível com pydantic v2 ou v1)
-            data = cct_data.model_dump() if hasattr(cct_data, "model_dump") else cct_data.dict()
+        # Inicializa a instância do extrator (utilizada para todos os arquivos)
+        extractor = CCTDataExtractor(api_key=os.environ["OPENAI_API_KEY"])
 
-            # Organiza os dados básicos em um DataFrame
-            basic_data = pd.DataFrame([{
-                'CNPJ': data.get('cnpj', ''),
-                'Nome': data.get('nome', ''),
-                'Início Vigência': data.get('inicio_vigencia', ''),
-                'Fim Vigência': data.get('fim_vigencia', '')
-            }])
+        for i, pdf in enumerate(uploaded_pdfs):
+            status_text.text(f"Processando o arquivo {i+1} de {total_files}: {pdf.name}")
 
-            # Organiza a lista de seguros (caso exista) em um DataFrame
-            seguros = data.get('seguro', [])
-            seguros_df = pd.DataFrame(seguros) if isinstance(seguros, list) and seguros else pd.DataFrame()
+            # Cria um arquivo temporário para cada PDF
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                tmp_file.write(pdf.read())
+                tmp_pdf_path = tmp_file.name
 
-            st.success("Extração realizada com sucesso!")
+            try:
+                cct_data = extractor.extract_from_pdf(tmp_pdf_path)
+                data = cct_data.model_dump() if hasattr(cct_data, "model_dump") else cct_data.dict()
 
-            # Exibe as tabelas na interface do Streamlit
-            st.subheader("Dados Básicos")
-            st.table(basic_data)
+                # Registra os dados básicos com identificação do arquivo
+                basic_records.append({
+                    'Arquivo': pdf.name,
+                    'CNPJ': data.get('cnpj', ''),
+                    'Nome': data.get('nome', ''),
+                    'Início Vigência': data.get('inicio_vigencia', ''),
+                    'Fim Vigência': data.get('fim_vigencia', '')
+                })
 
+                # Registra os dados de seguros, se existentes, adicionando o nome do arquivo
+                seguros = data.get('seguro', [])
+                if isinstance(seguros, list) and seguros:
+                    for seg in seguros:
+                        seguros_records.append({
+                            'Arquivo': pdf.name,
+                            'Nome da Cobertura': seg.get('nome_cobertura', ''),
+                            'Limite': seg.get('limite', '')
+                        })
+            except Exception as e:
+                st.error(f"Erro ao processar o arquivo {pdf.name}: {e}")
+            finally:
+                os.remove(tmp_pdf_path)
+
+            # Atualiza a barra de progresso
+            progress_bar.progress((i + 1) / total_files)
+
+        status_text.text("Processamento concluído!")
+
+        # Cria DataFrames a partir dos registros coletados
+        basic_df = pd.DataFrame(basic_records)
+        seguros_df = pd.DataFrame(seguros_records)
+
+        st.subheader("Dados Básicos")
+        st.table(basic_df)
+        if not seguros_df.empty:
+            st.subheader("Seguros")
+            st.table(seguros_df)
+
+        # Cria um arquivo Excel em memória com duas abas
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            basic_df.to_excel(writer, sheet_name='Dados Básicos', index=False)
             if not seguros_df.empty:
-                st.subheader("Seguros")
-                st.table(seguros_df)
+                seguros_df.to_excel(writer, sheet_name='Seguros', index=False)
+        output.seek(0)
+        excel_data = output.getvalue()
 
-            # Cria um arquivo Excel em memória contendo as tabelas
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                basic_data.to_excel(writer, sheet_name='Dados Básicos', index=False)
-                if not seguros_df.empty:
-                    seguros_df.to_excel(writer, sheet_name='Seguros', index=False)
-            output.seek(0)
-            excel_data = output.getvalue()
-
-            # Botão de download do Excel
-            st.download_button(
-                label="Baixar Excel",
-                data=excel_data,
-                file_name="dados_extraidos.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-
-        except Exception as e:
-            st.error(f"Erro ao extrair dados: {e}")
-        finally:
-            # Remove o arquivo temporário após o processamento
-            os.remove(tmp_pdf_path)
+        # Botão para download do arquivo Excel
+        st.download_button(
+            label="Baixar Excel",
+            data=excel_data,
+            file_name="dados_extraidos.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
